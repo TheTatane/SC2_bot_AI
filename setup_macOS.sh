@@ -21,7 +21,6 @@ else
 fi
 
 echo "python3.7 : Done."
-#brew install python3
 
 echo "Updating pip3"
 curl https://bootstrap.pypa.io/get-pip.py | python3
