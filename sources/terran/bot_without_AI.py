@@ -6,9 +6,11 @@ from sc2.ids.unit_typeid import UnitTypeId
 
 class SentdeBot(sc2.BotAI):
     def __init__(self):
+        self.MAX_SCV = 65
         self.scv_scouting = 0
+        self.iteration_per_min = 165
     async def on_step(self, iteration):
-
+        self.iteration=iteration
         await self.distribute_workers()
         await self.build_workers() #Build scv
         await self.build_supply() #Build supply to increase the limit of population
@@ -18,14 +20,14 @@ class SentdeBot(sc2.BotAI):
         await self.expand()
         await self.build_offensive_structure()
         await self.build_offensive_unit()
+        await self.defend()
         await self.attack()
 
-        #target = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
-
     async def build_workers(self):
-        for cc in self.units(COMMANDCENTER).ready.noqueue:
-            if self.can_afford(SCV):
-                await self.do(cc.train(SCV))
+        if self.units(SCV).amount < self.MAX_SCV:
+            for cc in self.units(COMMANDCENTER).ready.noqueue:
+                if self.can_afford(SCV):
+                    await self.do(cc.train(SCV))
 
 
     async def build_supply(self):
@@ -81,26 +83,23 @@ class SentdeBot(sc2.BotAI):
             if self.can_afford(MARINE) and self.supply_left > 0:
                 await self.do(barrack.train(MARINE))
 
+    async def defend(self):
+        if self.units(MARINE).idle.amount >= 5:
+            for struct in self.units.of_type([SUPPLYDEPOT, SUPPLYDEPOTLOWERED, SUPPLYDEPOTDROP,BARRACKS, COMMANDCENTER, REFINERY]).ready:
+                for enemy in self.known_enemy_units.not_structure:
+                    if enemy.position.to2.distance_to(struct.position.to2) < 10:
+                    #enemy.position.to2.distance_to(struct.position.to2) < 10
+                        for ma in self.units(MARINE).idle:
+                            await self.do(ma.attack(enemy))
+
+
     async def attack(self):
-        if self.units(MARINE).amount >= 5:
-            if len(self.known_enemy_units) > 0:
-                for ma in self.units(MARINE).idle:
-                    await self.do(ma.attack(random.choice(self.known_enemy_units)))
-
-        elif self.units(MARINE).amount >= 12:
+        if self.units(MARINE).idle.amount >= 15:
             for ma in self.units(MARINE).idle:
-                await self.do(ma.attack(self.choice_target(self.state)))
-
-    def choice_target(self, state):
-        if len(self.known_enemy_units) > 0:
-            return random.choice(self.known_enemy_units)
-        elif len(self.known_enemy_structures) > 0:
-            return random.choice(self.known_enemy_structures)
-        else:
-            return self.enemy_start_locations[0]
+                await self.do(ma.attack(self.enemy_start_locations[0]))
 
 
 run_game(maps.get("(2)AcidPlantLE"), [
     Bot(Race.Terran, SentdeBot()),
-    Computer(Race.Zerg, Difficulty.Easy)
+    Computer(Race.Terran, Difficulty.Hard)
     ], realtime=True)
