@@ -6,7 +6,7 @@ from sc2.ids.unit_typeid import UnitTypeId
 
 class SentdeBot(sc2.BotAI):
     def __init__(self):
-        self.MAX_SCV = 65
+        self.MAX_SCV = 60
         self.scv_scouting = 0
         self.iteration_per_min = 165
     async def on_step(self, iteration):
@@ -14,6 +14,8 @@ class SentdeBot(sc2.BotAI):
         await self.distribute_workers()
         await self.build_workers() #Build scv
         await self.build_supply() #Build supply to increase the limit of population
+        await self.morph_cc_in_orbital()
+        await self.drop_mule()
         await self.down_supply()
         await self.build_gaz()
         await self.scout()
@@ -25,9 +27,18 @@ class SentdeBot(sc2.BotAI):
 
     async def build_workers(self):
         if self.units(SCV).amount < self.MAX_SCV:
-            for cc in self.units(COMMANDCENTER).ready.noqueue:
-                if self.can_afford(SCV):
+            for cc in self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready.noqueue:
+                if self.can_afford(SCV) and not self.can_afford(ORBITALCOMMAND):
                     await self.do(cc.train(SCV))
+
+    async def drop_mule(self):
+        for oc in self.units(ORBITALCOMMAND).ready:
+            abilities = await self.get_available_abilities(oc)
+            if CALLDOWNMULE_CALLDOWNMULE in abilities:
+                for cc_alt in self.units(ORBITALCOMMAND).ready:
+                    pack_minerals = self.state.mineral_field.closer_than(10.0,cc_alt)
+                    for minerals in pack_minerals:
+                        await self.do(oc(CALLDOWNMULE_CALLDOWNMULE,minerals))
 
 
     async def build_supply(self):
@@ -41,6 +52,11 @@ class SentdeBot(sc2.BotAI):
         for supp_up in self.units(SUPPLYDEPOT).ready:
             if self.can_afford(MORPH_SUPPLYDEPOT_LOWER):
                 await self.do(supp_up(MORPH_SUPPLYDEPOT_LOWER))
+
+    async def morph_cc_in_orbital(self):
+        for cc in self.units(COMMANDCENTER).ready:
+            if self.can_afford(ORBITALCOMMAND):
+                await self.do(cc(UPGRADETOORBITAL_ORBITALCOMMAND))
 
     async def build_gaz(self):
         if self.supply_used >= 15:
@@ -64,13 +80,13 @@ class SentdeBot(sc2.BotAI):
             await self.do(scv_scout.move(enemy_location))
 
     async def expand(self):
-        if self.units(COMMANDCENTER).amount < 3 and self.can_afford(COMMANDCENTER) and self.units(BARRACKS).amount >= 1 :
+        if self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).amount < 3 and self.can_afford(COMMANDCENTER) and self.units(BARRACKS).amount >= 1 :
             await self.expand_now(COMMANDCENTER)
 
     async def build_offensive_structure(self):
         barracks_placement_position = self.main_base_ramp.barracks_correct_placement
         if self.units.of_type([SUPPLYDEPOT, SUPPLYDEPOTLOWERED, SUPPLYDEPOTDROP]).ready.exists:
-            nb_cc = self.units(COMMANDCENTER).amount
+            nb_cc = self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).amount
             if self.units(BARRACKS).amount + self.already_pending(UnitTypeId.BARRACKS) <= 0:
                 if self.can_afford(BARRACKS):
                     await self.build(BARRACKS, barracks_placement_position)
@@ -88,7 +104,6 @@ class SentdeBot(sc2.BotAI):
             for struct in self.units.of_type([SUPPLYDEPOT, SUPPLYDEPOTLOWERED, SUPPLYDEPOTDROP,BARRACKS, COMMANDCENTER, REFINERY]).ready:
                 for enemy in self.known_enemy_units.not_structure:
                     if enemy.position.to2.distance_to(struct.position.to2) < 10:
-                    #enemy.position.to2.distance_to(struct.position.to2) < 10
                         for ma in self.units(MARINE).idle:
                             await self.do(ma.attack(enemy))
 
@@ -101,5 +116,5 @@ class SentdeBot(sc2.BotAI):
 
 run_game(maps.get("(2)AcidPlantLE"), [
     Bot(Race.Terran, SentdeBot()),
-    Computer(Race.Terran, Difficulty.Hard)
-    ], realtime=True)
+    Computer(Race.Zerg, Difficulty.Medium)
+    ], realtime=False)
