@@ -1,15 +1,68 @@
 import sc2, random
-from sc2 import run_game, maps, Race, Difficulty, position
+from sc2 import run_game, maps, Race, Difficulty, Result, position
 from sc2.player import Bot, Computer, Human
 from sc2.constants import *
-import cv2
+import cv2, time
 import numpy as np
+import keras
+
+HEADLESS = False
 
 class SentdeBot(sc2.BotAI):
-    def __init__(self):
+    def __init__(self, use_model=False):
         self.MAX_SCV = 60
+        self.iteration_scout = 0
         self.scv_scouting = 0
         self.iteration_per_min = 165
+        self.do_something_after = 0
+        self.train_data = []
+        self.use_model = use_model
+
+        if self.use_model:
+            print("USING MODEL!")
+            #self.model = keras.models.load_model("")
+        #Exemple -> COMMANDCENTER : 3 = sight, (0,255,0) = RGB
+        self.sight_def = {
+                        COMMANDCENTER: [11],
+                        ORBITALCOMMAND: [11],
+                        SUPPLYDEPOT: [9],
+                        SUPPLYDEPOTLOWERED: [9],
+                        SCV: [8],
+                        MARINE: [9],
+                        REFINERY: [9],
+                        BARRACKS: [9],
+                    }
+
+        #Exemple -> COMMANDCENTER : 3 = size, (0,255,0) = RGB
+        self.size_def = {
+                        COMMANDCENTER: [3, (0, 255, 0)],
+                        ORBITALCOMMAND: [3, (0, 255, 0)],
+                        SUPPLYDEPOT: [1, (20, 235, 0)],
+                        SUPPLYDEPOTLOWERED: [1, (20, 235, 0)],
+                        SCV: [1, (55, 200, 0)],
+                        MARINE: [1, (55, 200, 0)],
+                        REFINERY: [1, (55, 200, 0)],
+                        BARRACKS: [2, (200, 100, 0)],
+                    }
+
+        self.army_units = {
+                    MARINE,
+                    HELLION,
+                }
+
+    def on_end(self, game_result):
+        print('--- on_end called ---')
+        print(game_result, self.use_model)
+
+        with open("log.txt","a") as f:
+            if self.use_model:
+                f.write("Model {}\n".format(game_result))
+            else:
+                f.write("Random {}\n".format(game_result))
+
+        #if game_result == Result.Victory:
+        #    np.save("train_data/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
+
     async def on_step(self, iteration):
         self.iteration=iteration
         await self.outputRGB()
@@ -19,13 +72,14 @@ class SentdeBot(sc2.BotAI):
         await self.morph_cc_in_orbital()
         await self.drop_mule()
         await self.down_supply()
-        #await self.build_gaz()
+        await self.build_gaz()
         await self.scout()
         await self.expand()
         await self.build_offensive_structure()
         await self.build_offensive_unit()
         await self.defend()
         await self.attack()
+        await self.reset_scout()
 
     def random_location_variance(self, enemy_start_location):
         x = enemy_start_location[0]
@@ -44,6 +98,7 @@ class SentdeBot(sc2.BotAI):
             y = self.game_info.map_size[1]
 
         go_to = position.Point2(position.Pointlike((x,y)))
+
         return go_to
 
     async def scout(self):
@@ -52,53 +107,29 @@ class SentdeBot(sc2.BotAI):
             if scout.is_idle:
                 enemy_location = self.enemy_start_locations[0]
                 move_to = self.random_location_variance(enemy_location)
-                print(move_to)
+                #print(move_to)
                 await self.do(scout.move(move_to))
 
     async def outputRGB(self):
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
 
-        #Exemple -> COMMANDCENTER : 3 = sight, (0,255,0) = RGB
-        sight_def = {
-                        COMMANDCENTER: [11, (0, 255, 0)],
-                        ORBITALCOMMAND: [11, (0, 255, 0)],
-                        SUPPLYDEPOT: [9, (20, 235, 0)],
-                        SUPPLYDEPOTLOWERED: [9, (20, 235, 0)],
-                        SCV: [8, (55, 200, 0)],
-                        MARINE: [9, (55, 200, 0)],
-                        REFINERY: [9, (55, 200, 0)],
-                        BARRACKS: [9, (200, 100, 0)],
-                    }
-
-        #Exemple -> COMMANDCENTER : 3 = size, (0,255,0) = RGB
-        size_def = {
-                        COMMANDCENTER: [3, (0, 255, 0)],
-                        ORBITALCOMMAND: [3, (0, 255, 0)],
-                        SUPPLYDEPOT: [1, (20, 235, 0)],
-                        SUPPLYDEPOTLOWERED: [1, (20, 235, 0)],
-                        SCV: [1, (55, 200, 0)],
-                        MARINE: [1, (55, 200, 0)],
-                        REFINERY: [1, (55, 200, 0)],
-                        BARRACKS: [2, (200, 100, 0)],
-                    }
-
-        for unit_sight in sight_def:
-            print(unit_sight)
+        for unit_sight in self.sight_def:
+            #print(unit_sight)
             for i in self.units(unit_sight).ready:
                 pos = i.position
-                cv2.circle(game_data, (int(pos[0]), int(pos[1])), sight_def[unit_sight][0],(255,250,250), -1)
+                cv2.circle(game_data, (int(pos[0]), int(pos[1])), self.sight_def[unit_sight][0],(255,250,250), -1)
 
-        for unit_size in size_def:
-            print(unit_size)
+        for unit_size in self.size_def:
+            #print(unit_size)
             for i in self.units(unit_size).ready:
-                print(i)
+                #print(i)
                 pos = i.position
-                cv2.circle(game_data, (int(pos[0]), int(pos[1])), size_def[unit_size][0], size_def[unit_size][1], -1)
+                cv2.circle(game_data, (int(pos[0]), int(pos[1])), self.size_def[unit_size][0], self.size_def[unit_size][1], -1)
 
         for cc in self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready:
             nearby_minerals = self.state.mineral_field.closer_than(10, cc)
             for mineral in nearby_minerals:
-                print(mineral)
+                #print(mineral)
                 pos = mineral.position
                 cv2.circle(game_data, (int(pos[0]), int(pos[1])), 1, (255,0,0), -1)
 
@@ -110,11 +141,34 @@ class SentdeBot(sc2.BotAI):
             pos = enemy_unit.position
             cv2.circle(game_data, (int(pos[0]), int(pos[1])), 1, (0, 0, 255), -1)
 
-        flipped = cv2.flip(game_data, 0)
-        resized = cv2.resize(flipped, dsize=None, fx=2, fy=2)
+        line_max = 50
+        mineral_count = self.minerals
 
-        cv2.imshow('OutputRGB', resized)
-        cv2.waitKey(1)
+        vespene_count = self.vespene
+
+        population_ratio = self.supply_left / self.supply_cap
+        if population_ratio > 1.0:
+            population_ratio = 1.0
+
+        plausible_supply = self.supply_cap / 200.0
+
+        military_weight = self.units.of_type(self.army_units).amount / (self.supply_cap-self.supply_left)
+        if military_weight > 1.0:
+            military_weight = 1.0
+
+
+        cv2.line(game_data, (0, 19), (int(line_max*military_weight), 19), (250, 250, 200), 3)  # worker/supply ratio
+        cv2.line(game_data, (0, 15), (int(line_max*plausible_supply), 15), (220, 200, 200), 3)  # plausible supply (supply/200.0)
+        cv2.line(game_data, (0, 11), (int(line_max*population_ratio), 11), (150, 150, 150), 3)  # population ratio (supply_left/supply)
+        cv2.line(game_data, (0, 7), (int(vespene_count/line_max), 7), (210, 200, 0), 3)  # gas / 1500
+        cv2.line(game_data, (0, 3), (int(mineral_count/line_max), 3), (0, 255, 25), 3)  # minerals minerals/1500
+
+        self.flipped = cv2.flip(game_data, 0)
+
+        if not HEADLESS:
+            resized = cv2.resize(self.flipped, dsize=None, fx=2, fy=2)
+            cv2.imshow('Intel', resized)
+            cv2.waitKey(1)
 
     async def build_workers(self):
         if self.units(SCV).amount < self.MAX_SCV:
@@ -145,9 +199,9 @@ class SentdeBot(sc2.BotAI):
                 await self.do(supp_up(MORPH_SUPPLYDEPOT_LOWER))
 
     async def morph_cc_in_orbital(self):
-        for cc in self.units(COMMANDCENTER).ready:
+        for cc in self.units(COMMANDCENTER).ready.idle:
             if self.can_afford(ORBITALCOMMAND):
-                await self.do(cc(UPGRADETOORBITAL_ORBITALCOMMAND))
+                await self.do(cc(AbilityId.UPGRADETOORBITAL_ORBITALCOMMAND))
 
     async def build_gaz(self):
         if self.supply_used >= 15:
@@ -162,6 +216,17 @@ class SentdeBot(sc2.BotAI):
                             break
                         if not self.units(REFINERY).closer_than(1.0, vespene).exists:
                             await self.do(worker.build(REFINERY, vespene))
+
+    async def reset_scout(self):
+        if ((self.iteration-self.iteration_scout) / self.iteration_per_min) > 3:
+            #print("iteration", (self.iteration / self.ITERATIONS_PER_MINUTE))
+            self.iteration_scout=self.iteration
+            print("okk")
+            print(self.iteration / self.iteration_per_min)
+            scv_scout = self.units(SCV)[0]
+            enemy_location = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
+            await self.do(scv_scout.move(enemy_location))
+
 
     async def scout(self):
         if self.units(SCV).amount >= 15 and self.scv_scouting < 1:
@@ -185,10 +250,20 @@ class SentdeBot(sc2.BotAI):
                 if self.can_afford(BARRACKS):
                     await self.build(BARRACKS, barracks_placement_position)
 
+            for sp in self.units(BARRACKS).ready:
+                if sp.add_on_tag == 0:
+                    await self.do(sp.build(BARRACKSTECHLAB))
+
     async def build_offensive_unit(self):
         for barrack in self.units(BARRACKS).ready.noqueue:
+            ratio = 100
+            if len(self.units.of_type(MARINE)) >0:
+                ratio = len(self.units.of_type(MARAUDER)) / len(self.units.of_type(MARINE)) * 100
+                print("RATIO : "+str(ratio))
             if self.can_afford(MARINE) and self.supply_left > 0:
                 await self.do(barrack.train(MARINE))
+            if self.can_afford(MARAUDER) and ratio < 30 and self.supply_left > 0:
+                await self.do(barrack.train(MARAUDER))
 
     async def defend(self):
         if self.units(MARINE).idle.amount >= 5:
@@ -200,13 +275,64 @@ class SentdeBot(sc2.BotAI):
 
 
     async def attack(self):
-        if self.units(MARINE).idle.amount >= 15:
-            for ma in self.units(MARINE).idle:
-                await self.do(ma.attack(self.enemy_start_locations[0]))
+        if self.units.of_type(self.army_units).idle.amount > 0:
+            choice = random.randrange(0, 4)
+            target = False
+            count_marine = 0
+            if self.iteration > self.do_something_after:
+                if self.use_model:
+                    prediction = self.model.predict([self.flipped.reshape([-1,176,200,3])])
+                    #choice = np.argmax(prediction[0])
+                    #print('prediction: ',choice)
+
+                    choice_dict = {0: "No Attack!",
+                                   1: "Attack close to our nexus!",
+                                   2: "Attack Enemy Structure!",
+                                   3: "Attack Eneemy Start!"}
+
+                    print("Choice #{}:{}".format(choice, choice_dict[choice]))
+                else:
+                    choice = random.randrange(0, 4)
+
+                if choice == 0:
+                    # no attack
+                    wait = random.randrange(20, 165)
+                    self.do_something_after = self.iteration + wait
+
+                elif choice == 1:
+                    #attack_unit_closest_nexus
+                    if len(self.known_enemy_units) > 0:
+                        target = self.known_enemy_units.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
+
+                elif choice == 2:
+                    #attack enemy structures
+                    count_marine = 12
+                    target = self.enemy_start_locations[0]
+
+                elif choice == 3:
+                    #attack_enemy_start
+                    count_marine = 25
+                    count_marauder = 5
+                    target = self.enemy_start_locations[0]
+
+                if target:
+                    count_order = 0
+                    for army in self.units.of_type(self.army_units).idle:
+                        await self.do(army.attack(target))
+                        count_order += 1
+                        if  count_order > count_marine:
+                            break
 
 
-run_game(maps.get("(2)AcidPlantLE"), [
-    #Human(Race.Terran),
-    Bot(Race.Terran, SentdeBot()),
-    Computer(Race.Zerg, Difficulty.Hard)
-    ], realtime=False)
+                y = np.zeros(4)
+                y[choice] = 1
+                print(y)
+                self.train_data.append([y,self.flipped])
+
+
+for i in range(1):
+    run_game(maps.get("AbyssalReefLE"), [
+        #Human(Race.Terran),
+        Bot(Race.Terran, SentdeBot(use_model=False)),
+        Computer(Race.Zerg, Difficulty.Medium)
+        ], realtime=False)
