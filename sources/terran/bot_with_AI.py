@@ -17,6 +17,10 @@ class SentdeBot(sc2.BotAI):
         self.do_something_after = 0
         self.train_data = []
         self.use_model = use_model
+        self.nb_cc = 3
+        self.base_location = []
+        self.barrack_try_addon = []
+
 
         if self.use_model:
             print("USING MODEL!")
@@ -60,17 +64,21 @@ class SentdeBot(sc2.BotAI):
             else:
                 f.write("Random {}\n".format(game_result))
 
-        #if game_result == Result.Victory:
-        #    np.save("train_data/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
+        if game_result == Result.Victory:
+            np.save("train_data/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
 
     async def on_step(self, iteration):
         self.iteration=iteration
+
+        for el in self.expansion_locations:
+            self.base_location.append(el)
+
         await self.outputRGB()
         await self.distribute_workers()
         await self.build_workers() #Build scv
         await self.build_supply() #Build supply to increase the limit of population
         await self.morph_cc_in_orbital()
-        await self.drop_mule()
+        await self.mule_or_scan()
         await self.down_supply()
         await self.build_gaz()
         await self.scout()
@@ -80,6 +88,18 @@ class SentdeBot(sc2.BotAI):
         await self.defend()
         await self.attack()
         await self.reset_scout()
+        await self.build_research_building()
+        await self.upgrade()
+
+    def is_in_list(self, tag):
+        ok = False
+        i = 0
+        if len(self.barrack_try_addon):
+            while i < len(self.barrack_try_addon) and not ok:
+                ok = (self.barrack_try_addon[i]==tag)
+                i += 1
+
+        return ok
 
     def random_location_variance(self, enemy_start_location):
         x = enemy_start_location[0]
@@ -176,6 +196,16 @@ class SentdeBot(sc2.BotAI):
                 if self.can_afford(SCV) and not self.can_afford(ORBITALCOMMAND):
                     await self.do(cc.train(SCV))
 
+    async def mule_or_scan(self):
+        if self.iteration < 900:
+            await self.drop_mule()
+        else:
+            n = random.randrange(0,5)
+            if n < 2:
+                await self.drop_mule()
+            else:
+                await self.scan()
+
     async def drop_mule(self):
         for oc in self.units(ORBITALCOMMAND).ready:
             abilities = await self.get_available_abilities(oc)
@@ -185,10 +215,22 @@ class SentdeBot(sc2.BotAI):
                     for minerals in pack_minerals:
                         await self.do(oc(CALLDOWNMULE_CALLDOWNMULE,minerals))
 
+    async def scan(self):
+        for oc in self.units(ORBITALCOMMAND).ready:
+            abilities = await self.get_available_abilities(oc)
+            if CALLDOWNMULE_CALLDOWNMULE in abilities:
+                for cc_alt in self.units(ORBITALCOMMAND).ready:
+                    n = random.randrange(0,len(self.base_location))
+                    await self.do(oc(SCANNERSWEEP_SCAN,self.base_location[n]))
 
     async def build_supply(self):
         if self.supply_left < 3 and not self.already_pending(SUPPLYDEPOT):
-            cc_onMap = self.units(COMMANDCENTER).ready
+            cc_onMap = self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready
+            if (cc_onMap.exists):
+                if self.can_afford(SUPPLYDEPOT):
+                    await self.build(SUPPLYDEPOT, near = cc_onMap.first)
+        if self.supply_left <= 0 and self.already_pending(SUPPLYDEPOT) <= 2:
+            cc_onMap = self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready
             if (cc_onMap.exists):
                 if self.can_afford(SUPPLYDEPOT):
                     await self.build(SUPPLYDEPOT, near = cc_onMap.first)
@@ -218,25 +260,24 @@ class SentdeBot(sc2.BotAI):
                             await self.do(worker.build(REFINERY, vespene))
 
     async def reset_scout(self):
-        if ((self.iteration-self.iteration_scout) / self.iteration_per_min) > 3:
-            #print("iteration", (self.iteration / self.ITERATIONS_PER_MINUTE))
+        if ((self.iteration-self.iteration_scout) / self.iteration_per_min) > 2*2:
             self.iteration_scout=self.iteration
-            print("okk")
-            print(self.iteration / self.iteration_per_min)
             scv_scout = self.units(SCV)[0]
-            enemy_location = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
-            await self.do(scv_scout.move(enemy_location))
+            #enemy_location = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
+            n = random.randrange(0,len(self.base_location))
+            await self.do(scv_scout.move(self.base_location[n]))
 
 
     async def scout(self):
         if self.units(SCV).amount >= 15 and self.scv_scouting < 1:
             self.scv_scouting=1;
             scv_scout = self.units(SCV)[0]
-            enemy_location = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
-            await self.do(scv_scout.move(enemy_location))
+            await self.do(scv_scout.move(self.enemy_start_locations[0]))
 
     async def expand(self):
-        if self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).amount < 3 and self.can_afford(COMMANDCENTER) and self.units(BARRACKS).amount >= 1 :
+        if self.iteration == 1700 or  self.iteration == 2000:
+            self.nb_cc += 1
+        if self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).amount < self.nb_cc and self.can_afford(COMMANDCENTER) and self.units(BARRACKS).amount >= 1 :
             await self.expand_now(COMMANDCENTER)
 
     async def build_offensive_structure(self):
@@ -250,8 +291,10 @@ class SentdeBot(sc2.BotAI):
                 if self.can_afford(BARRACKS):
                     await self.build(BARRACKS, barracks_placement_position)
 
-            for sp in self.units(BARRACKS).ready:
-                if sp.add_on_tag == 0:
+            for sp in self.units(BARRACKS).ready.idle:
+                if not self.is_in_list(sp.tag) and sp.add_on_tag == 0 and self.can_afford(BARRACKSTECHLAB) and ((self.units(BARRACKSTECHLAB).amount + self.already_pending(UnitTypeId.BARRACKSTECHLAB)) < ((self.units(BARRACKS).amount + self.already_pending(UnitTypeId.BARRACKS))/2)):
+                    #await self.do(cc(AbilityId.BUILD_TECHLAB_BARRACKS))
+                    self.barrack_try_addon.append(sp.tag)
                     await self.do(sp.build(BARRACKSTECHLAB))
 
     async def build_offensive_unit(self):
@@ -259,11 +302,32 @@ class SentdeBot(sc2.BotAI):
             ratio = 100
             if len(self.units.of_type(MARINE)) >0:
                 ratio = len(self.units.of_type(MARAUDER)) / len(self.units.of_type(MARINE)) * 100
-                print("RATIO : "+str(ratio))
+            if barrack.has_add_on and self.can_afford(MARAUDER) and ratio < 30 and self.supply_left > 0:
+                await self.do(barrack.train(MARAUDER))
             if self.can_afford(MARINE) and self.supply_left > 0:
                 await self.do(barrack.train(MARINE))
-            if self.can_afford(MARAUDER) and ratio < 30 and self.supply_left > 0:
-                await self.do(barrack.train(MARAUDER))
+
+    async def build_research_building(self):
+        if not self.units(ENGINEERINGBAY).ready.exists and self.can_afford(ENGINEERINGBAY) and len(self.units(BARRACKS).ready) > 3 and self.already_pending(UnitTypeId.ENGINEERINGBAY) <= 0:
+            barracks_placement_position = self.main_base_ramp.barracks_correct_placement
+            await self.build(ENGINEERINGBAY, barracks_placement_position)
+
+    async def upgrade(self):
+        if self.units(BARRACKSTECHLAB).ready.exists:
+            for lab in self.units(BARRACKSTECHLAB).ready:
+                abilities = await self.get_available_abilities(lab)
+                if AbilityId.RESEARCH_COMBATSHIELD in abilities and self.can_afford(AbilityId.RESEARCH_COMBATSHIELD):
+                    await self.do(lab(AbilityId.RESEARCH_COMBATSHIELD))
+                elif AbilityId.RESEARCH_CONCUSSIVESHELLS in abilities and self.can_afford(AbilityId.RESEARCH_CONCUSSIVESHELLS):
+                    await self.do(lab(AbilityId.RESEARCH_CONCUSSIVESHELLS))
+        if self.units(ENGINEERINGBAY).ready.exists:
+            for bay in self.units(ENGINEERINGBAY).ready:
+                abilities = await self.get_available_abilities(bay)
+                if AbilityId.ENGINEERINGBAYRESEARCH_TERRANINFANTRYARMORLEVEL1 in abilities and self.can_afford(AbilityId.ENGINEERINGBAYRESEARCH_TERRANINFANTRYARMORLEVEL1):
+                    await self.do(bay(AbilityId.ENGINEERINGBAYRESEARCH_TERRANINFANTRYARMORLEVEL1))
+                elif AbilityId.ENGINEERINGBAYRESEARCH_TERRANINFANTRYWEAPONSLEVEL1 in abilities and self.can_afford(AbilityId.ENGINEERINGBAYRESEARCH_TERRANINFANTRYWEAPONSLEVEL1):
+                    await self.do(bay(AbilityId.ENGINEERINGBAYRESEARCH_TERRANINFANTRYWEAPONSLEVEL1))
+
 
     async def defend(self):
         if self.units(MARINE).idle.amount >= 5:
@@ -279,6 +343,7 @@ class SentdeBot(sc2.BotAI):
             choice = random.randrange(0, 4)
             target = False
             count_marine = 0
+            count_marauder = 0
             if self.iteration > self.do_something_after:
                 if self.use_model:
                     prediction = self.model.predict([self.flipped.reshape([-1,176,200,3])])
@@ -290,7 +355,6 @@ class SentdeBot(sc2.BotAI):
                                    2: "Attack Enemy Structure!",
                                    3: "Attack Eneemy Start!"}
 
-                    print("Choice #{}:{}".format(choice, choice_dict[choice]))
                 else:
                     choice = random.randrange(0, 4)
 
@@ -300,39 +364,51 @@ class SentdeBot(sc2.BotAI):
                     self.do_something_after = self.iteration + wait
 
                 elif choice == 1:
-                    #attack_unit_closest_nexus
+                    #attack enemy structures
+                    count_marine = 60
+                    count_marauder = 25
                     if len(self.known_enemy_units) > 0:
-                        target = self.known_enemy_units.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
+                        target = self.enemy_start_locations[0]
 
                 elif choice == 2:
-                    #attack enemy structures
-                    count_marine = 12
-                    target = self.enemy_start_locations[0]
+                    #attack_unit_closest_base
+                    count_marine = 15
+                    if len(self.known_enemy_structures) > 0:
+                        target = self.known_enemy_structures.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
 
                 elif choice == 3:
                     #attack_enemy_start
                     count_marine = 25
                     count_marauder = 5
-                    target = self.enemy_start_locations[0]
+                    if len(self.known_enemy_units) > 0:
+                        target = self.known_enemy_units.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
 
                 if target:
-                    count_order = 0
-                    for army in self.units.of_type(self.army_units).idle:
-                        await self.do(army.attack(target))
-                        count_order += 1
-                        if  count_order > count_marine:
+                    count_order_marine = 0
+                    count_order_marauder = 0
+
+                    for army in self.units.of_type(MARINE).idle:
+                        if count_order_marine < count_marine:
+                            await self.do(army.attack(target))
+                            count_order_marine += 1
+                        else:
                             break
 
+                    for army in self.units.of_type(MARAUDER).idle:
+                        if count_order_marauder < count_marauder:
+                            await self.do(army.attack(target))
+                            count_order_marauder += 1
+                        else:
+                            break
 
                 y = np.zeros(4)
                 y[choice] = 1
-                print(y)
                 self.train_data.append([y,self.flipped])
-
 
 for i in range(1):
     run_game(maps.get("AbyssalReefLE"), [
         #Human(Race.Terran),
         Bot(Race.Terran, SentdeBot(use_model=False)),
-        Computer(Race.Zerg, Difficulty.Medium)
+        Computer(Race.Zerg, Difficulty.Hard)
         ], realtime=False)
+#400313
