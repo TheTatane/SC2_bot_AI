@@ -11,6 +11,7 @@ HEADLESS = False
 class SentdeBot(sc2.BotAI):
     def __init__(self, use_model=False):
         self.MAX_SCV = 60
+        self.LIMIT_supply = 200
         self.iteration_scout = 0
         self.scv_scouting = 0
         self.iteration_per_min = 165
@@ -24,7 +25,7 @@ class SentdeBot(sc2.BotAI):
 
         if self.use_model:
             print("USING MODEL!")
-            self.model = keras.models.load_model("Model-50-epochs-0.0001-attack")
+            self.model = keras.models.load_model("Model-100-epochs-0.0001-attack")
 
         #Exemple -> COMMANDCENTER : 3 = sight, (0,255,0) = RGB
         self.sight_def = {
@@ -161,13 +162,17 @@ class SentdeBot(sc2.BotAI):
         mineral_count = self.minerals
 
         vespene_count = self.vespene
-
+        plausible_supply = 0
+        population_ratio = 0
         if self.supply_left > 0 and self.supply_cap > 0:
             population_ratio = self.supply_left / self.supply_cap
         else:
-            population_ratio = 0s
+            population_ratio = 0
 
-        plausible_supply = self.supply_cap / 200.0
+        if self.supply_cap > 0:
+            plausible_supply = self.supply_cap / 200.0
+        else:
+            plausible_supply = 0
 
         pop = self.supply_cap-self.supply_left
         if pop == 0:
@@ -224,12 +229,12 @@ class SentdeBot(sc2.BotAI):
                     await self.do(oc(SCANNERSWEEP_SCAN,self.base_location[n]))
 
     async def build_supply(self):
-        if self.supply_left < 3 and not self.already_pending(SUPPLYDEPOT):
+        if self.supply_left < 3 and not self.already_pending(SUPPLYDEPOT) and self.supply_used < self.LIMIT_supply:
             cc_onMap = self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready
             if (cc_onMap.exists):
                 if self.can_afford(SUPPLYDEPOT):
                     await self.build(SUPPLYDEPOT, near = cc_onMap.first)
-        if self.supply_left <= 0 and self.already_pending(SUPPLYDEPOT) <= 2:
+        if self.supply_left <= 0 and self.already_pending(SUPPLYDEPOT) <= 2 and self.supply_used < self.LIMIT_supply:
             cc_onMap = self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready
             if (cc_onMap.exists):
                 if self.can_afford(SUPPLYDEPOT):
@@ -339,7 +344,7 @@ class SentdeBot(sc2.BotAI):
 
 
     async def attack(self):
-        if self.units.of_type(self.army_units).idle.amount > 0:
+        if self.units.of_type(self.army_units).idle.amount > 5:
             choice = random.randrange(0, 4)
             target = False
             count_marine = 0
@@ -400,7 +405,7 @@ class SentdeBot(sc2.BotAI):
                 y[choice] = 1
                 self.train_data.append([y,self.flipped])
 
-for i in range(49):
+for i in range(1):
     run_game(maps.get("AbyssalReefLE"), [
         #Human(Race.Terran),
         Bot(Race.Terran, SentdeBot(use_model=True)),
