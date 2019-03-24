@@ -24,7 +24,7 @@ class SentdeBot(sc2.BotAI):
 
         if self.use_model:
             print("USING MODEL!")
-            self.model = keras.models.load_model("BasicCNN-50-epochs-0.0001-LR-STAGE1")
+            self.model = keras.models.load_model("Model-50-epochs-0.0001-attack")
 
         #Exemple -> COMMANDCENTER : 3 = sight, (0,255,0) = RGB
         self.sight_def = {
@@ -162,9 +162,10 @@ class SentdeBot(sc2.BotAI):
 
         vespene_count = self.vespene
 
-        population_ratio = self.supply_left / self.supply_cap
-        if population_ratio > 1.0:
-            population_ratio = 1.0
+        if self.supply_left > 0 and self.supply_cap > 0:
+            population_ratio = self.supply_left / self.supply_cap
+        else:
+            population_ratio = 0s
 
         plausible_supply = self.supply_cap / 200.0
 
@@ -259,7 +260,7 @@ class SentdeBot(sc2.BotAI):
                             await self.do(worker.build(REFINERY, vespene))
 
     async def reset_scout(self):
-        if ((self.iteration-self.iteration_scout) / self.iteration_per_min) > 2*2:
+        if ((self.iteration-self.iteration_scout) / self.iteration_per_min) > 2*2 and len(self.units.of_type(MARINE)) > 0:
             self.iteration_scout=self.iteration
             scv_scout = self.units(SCV)[0]
             #enemy_location = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
@@ -399,7 +400,7 @@ class SentdeBot(sc2.BotAI):
                 y[choice] = 1
                 self.train_data.append([y,self.flipped])
 
-for i in range(1):
+for i in range(49):
     run_game(maps.get("AbyssalReefLE"), [
         #Human(Race.Terran),
         Bot(Race.Terran, SentdeBot(use_model=True)),
