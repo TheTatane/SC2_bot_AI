@@ -24,7 +24,8 @@ class SentdeBot(sc2.BotAI):
 
         if self.use_model:
             print("USING MODEL!")
-            #self.model = keras.models.load_model("")
+            self.model = keras.models.load_model("BasicCNN-50-epochs-0.0001-LR-STAGE1")
+
         #Exemple -> COMMANDCENTER : 3 = sight, (0,255,0) = RGB
         self.sight_def = {
                         COMMANDCENTER: [11],
@@ -127,29 +128,24 @@ class SentdeBot(sc2.BotAI):
             if scout.is_idle:
                 enemy_location = self.enemy_start_locations[0]
                 move_to = self.random_location_variance(enemy_location)
-                #print(move_to)
                 await self.do(scout.move(move_to))
 
     async def outputRGB(self):
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
 
         for unit_sight in self.sight_def:
-            #print(unit_sight)
             for i in self.units(unit_sight).ready:
                 pos = i.position
                 cv2.circle(game_data, (int(pos[0]), int(pos[1])), self.sight_def[unit_sight][0],(255,250,250), -1)
 
         for unit_size in self.size_def:
-            #print(unit_size)
             for i in self.units(unit_size).ready:
-                #print(i)
                 pos = i.position
                 cv2.circle(game_data, (int(pos[0]), int(pos[1])), self.size_def[unit_size][0], self.size_def[unit_size][1], -1)
 
         for cc in self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready:
             nearby_minerals = self.state.mineral_field.closer_than(10, cc)
             for mineral in nearby_minerals:
-                #print(mineral)
                 pos = mineral.position
                 cv2.circle(game_data, (int(pos[0]), int(pos[1])), 1, (255,0,0), -1)
 
@@ -172,7 +168,10 @@ class SentdeBot(sc2.BotAI):
 
         plausible_supply = self.supply_cap / 200.0
 
-        military_weight = self.units.of_type(self.army_units).amount / (self.supply_cap-self.supply_left)
+        pop = self.supply_cap-self.supply_left
+        if pop == 0:
+            pop = 200
+        military_weight = self.units.of_type(self.army_units).amount / pop
         if military_weight > 1.0:
             military_weight = 1.0
 
@@ -347,13 +346,8 @@ class SentdeBot(sc2.BotAI):
             if self.iteration > self.do_something_after:
                 if self.use_model:
                     prediction = self.model.predict([self.flipped.reshape([-1,176,200,3])])
-                    #choice = np.argmax(prediction[0])
-                    #print('prediction: ',choice)
-
-                    choice_dict = {0: "No Attack!",
-                                   1: "Attack close to our nexus!",
-                                   2: "Attack Enemy Structure!",
-                                   3: "Attack Eneemy Start!"}
+                    choice = np.argmax(prediction[0])
+                    print('prediction: ',choice)
 
                 else:
                     choice = random.randrange(0, 4)
@@ -364,20 +358,20 @@ class SentdeBot(sc2.BotAI):
                     self.do_something_after = self.iteration + wait
 
                 elif choice == 1:
-                    #attack enemy structures
+                    #attack_enemy_start
                     count_marine = 60
                     count_marauder = 25
                     if len(self.known_enemy_units) > 0:
                         target = self.enemy_start_locations[0]
 
                 elif choice == 2:
-                    #attack_unit_closest_base
+                    #attack_closest_structures
                     count_marine = 15
                     if len(self.known_enemy_structures) > 0:
                         target = self.known_enemy_structures.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
 
                 elif choice == 3:
-                    #attack_enemy_start
+                    #attack_closest_enemy_units
                     count_marine = 25
                     count_marauder = 5
                     if len(self.known_enemy_units) > 0:
@@ -408,7 +402,6 @@ class SentdeBot(sc2.BotAI):
 for i in range(1):
     run_game(maps.get("AbyssalReefLE"), [
         #Human(Race.Terran),
-        Bot(Race.Terran, SentdeBot(use_model=False)),
+        Bot(Race.Terran, SentdeBot(use_model=True)),
         Computer(Race.Zerg, Difficulty.Hard)
         ], realtime=False)
-#400313
