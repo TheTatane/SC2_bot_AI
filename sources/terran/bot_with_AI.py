@@ -53,6 +53,7 @@ class SentdeBot(sc2.BotAI):
 
         self.army_units = {
                     MARINE,
+                    MARAUDER,
                     HELLION,
                 }
 
@@ -247,7 +248,7 @@ class SentdeBot(sc2.BotAI):
 
     async def morph_cc_in_orbital(self):
         for cc in self.units(COMMANDCENTER).ready.idle:
-            if self.can_afford(ORBITALCOMMAND):
+            if self.can_afford(ORBITALCOMMAND) and len(self.units(BARRACKS).ready) > 1:
                 await self.do(cc(AbilityId.UPGRADETOORBITAL_ORBITALCOMMAND))
 
     async def build_gaz(self):
@@ -335,16 +336,16 @@ class SentdeBot(sc2.BotAI):
 
 
     async def defend(self):
-        if self.units(MARINE).idle.amount >= 5:
+        if self.units.of_type(self.army_units).idle.amount >= 5:
             for struct in self.units.of_type([SUPPLYDEPOT, SUPPLYDEPOTLOWERED, SUPPLYDEPOTDROP,BARRACKS, COMMANDCENTER, REFINERY]).ready:
                 for enemy in self.known_enemy_units.not_structure:
                     if enemy.position.to2.distance_to(struct.position.to2) < 10:
-                        for ma in self.units(MARINE).idle:
+                        for ma in self.units.of_type(self.army_units).idle:
                             await self.do(ma.attack(enemy))
 
 
     async def attack(self):
-        if self.units.of_type(self.army_units).idle.amount > 5:
+        if self.units.of_type(self.army_units).idle.amount > 15:
             choice = random.randrange(0, 4)
             target = False
             count_marine = 0
@@ -354,7 +355,6 @@ class SentdeBot(sc2.BotAI):
                     prediction = self.model.predict([self.flipped.reshape([-1,176,200,3])])
                     choice = np.argmax(prediction[0])
                     print('prediction: ',choice)
-
                 else:
                     choice = random.randrange(0, 4)
 
@@ -363,20 +363,20 @@ class SentdeBot(sc2.BotAI):
                     wait = random.randrange(20, 165)
                     self.do_something_after = self.iteration + wait
 
-                elif choice == 1:
+                elif choice == 1 and len(self.units.of_type(MARINE).idle) > 35 and len(self.units.of_type(MARAUDER).idle) > 15:
                     #attack_enemy_start
                     count_marine = 60
                     count_marauder = 25
                     if len(self.known_enemy_units) > 0:
                         target = self.enemy_start_locations[0]
 
-                elif choice == 2:
+                elif choice == 2 and len(self.units.of_type(MARINE).idle) > 15:
                     #attack_closest_structures
                     count_marine = 15
                     if len(self.known_enemy_structures) > 0:
                         target = self.known_enemy_structures.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
 
-                elif choice == 3:
+                elif choice == 3 and len(self.units.of_type(MARINE).idle) > 20 and len(self.units.of_type(MARAUDER).idle) > 5:
                     #attack_closest_enemy_units
                     count_marine = 25
                     count_marauder = 5
@@ -386,6 +386,9 @@ class SentdeBot(sc2.BotAI):
                 if target:
                     count_order_marine = 0
                     count_order_marauder = 0
+
+                    if choice != 1:
+                        target = target.position
 
                     for army in self.units.of_type(MARINE).idle:
                         if count_order_marine < count_marine:
@@ -403,11 +406,12 @@ class SentdeBot(sc2.BotAI):
 
                 y = np.zeros(4)
                 y[choice] = 1
+                print(choice)
                 self.train_data.append([y,self.flipped])
 
 for i in range(1):
     run_game(maps.get("AbyssalReefLE"), [
         #Human(Race.Terran),
-        Bot(Race.Terran, SentdeBot(use_model=True)),
+        Bot(Race.Terran, SentdeBot(use_model=False)),
         Computer(Race.Zerg, Difficulty.Hard)
         ], realtime=False)
