@@ -134,7 +134,7 @@ class SentdeBot(sc2.BotAI):
 
     async def outputRGB(self):
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
-
+        """
         for unit_sight in self.sight_def:
             for i in self.units(unit_sight).ready:
                 pos = i.position
@@ -188,15 +188,16 @@ class SentdeBot(sc2.BotAI):
         cv2.line(game_data, (0, 11), (int(line_max*population_ratio), 11), (150, 150, 150), 3)  # population ratio (supply_left/supply)
         cv2.line(game_data, (0, 7), (int(vespene_count/line_max), 7), (210, 200, 0), 3)  # gas / 1500
         cv2.line(game_data, (0, 3), (int(mineral_count/line_max), 3), (0, 255, 25), 3)  # minerals minerals/1500
-
+        """
         self.flipped = cv2.flip(game_data, 0)
 
-        if not HEADLESS:
+        """if not HEADLESS:
             resized = cv2.resize(self.flipped, dsize=None, fx=2, fy=2)
             cv2.imshow('Intel', resized)
-            cv2.waitKey(1)
+            cv2.waitKey(1)"""
 
     async def build_workers(self):
+        print("build_workers")
         if self.units(SCV).amount < self.MAX_SCV:
             for cc in self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready.noqueue:
                 if self.can_afford(SCV) and not self.can_afford(ORBITALCOMMAND):
@@ -216,26 +217,24 @@ class SentdeBot(sc2.BotAI):
         for oc in self.units(ORBITALCOMMAND).ready:
             abilities = await self.get_available_abilities(oc)
             if CALLDOWNMULE_CALLDOWNMULE in abilities:
-                for cc_alt in self.units(ORBITALCOMMAND).ready:
-                    pack_minerals = self.state.mineral_field.closer_than(10.0,cc_alt)
-                    for minerals in pack_minerals:
-                        await self.do(oc(CALLDOWNMULE_CALLDOWNMULE,minerals))
+                pack_minerals = self.state.mineral_field.closer_than(10.0,oc)
+                for minerals in pack_minerals:
+                    await self.do(oc(CALLDOWNMULE_CALLDOWNMULE,minerals))
 
     async def scan(self):
         for oc in self.units(ORBITALCOMMAND).ready:
             abilities = await self.get_available_abilities(oc)
             if CALLDOWNMULE_CALLDOWNMULE in abilities:
-                for cc_alt in self.units(ORBITALCOMMAND).ready:
-                    n = random.randrange(0,len(self.base_location))
-                    await self.do(oc(SCANNERSWEEP_SCAN,self.base_location[n]))
+                n = random.randrange(0,len(self.base_location))
+                await self.do(oc(SCANNERSWEEP_SCAN,self.base_location[n]))
 
     async def build_supply(self):
-        if self.supply_left < 3 and not self.already_pending(SUPPLYDEPOT) and self.supply_used < self.LIMIT_supply:
+        if self.supply_left < 3 and not self.already_pending(SUPPLYDEPOT) and self.supply_used < self.LIMIT_supply and self.supply_cap < 200:
             cc_onMap = self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready
             if (cc_onMap.exists):
                 if self.can_afford(SUPPLYDEPOT):
                     await self.build(SUPPLYDEPOT, near = cc_onMap.first)
-        if self.supply_left <= 0 and self.already_pending(SUPPLYDEPOT) <= 2 and self.supply_used < self.LIMIT_supply:
+        if self.supply_left <= 0 and self.already_pending(SUPPLYDEPOT) <= 2 and self.supply_used < self.LIMIT_supply and self.supply_cap < 200:
             cc_onMap = self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).ready
             if (cc_onMap.exists):
                 if self.can_afford(SUPPLYDEPOT):
@@ -281,7 +280,7 @@ class SentdeBot(sc2.BotAI):
             await self.do(scv_scout.move(self.enemy_start_locations[0]))
 
     async def expand(self):
-        if self.iteration == 1700 or  self.iteration == 2000:
+        if self.iteration == 1700 or self.iteration == 2000:
             self.nb_cc += 1
         if self.units.of_type([COMMANDCENTER, ORBITALCOMMAND]).amount < self.nb_cc and self.can_afford(COMMANDCENTER) and self.units(BARRACKS).amount >= 1 :
             await self.expand_now(COMMANDCENTER)
@@ -336,16 +335,25 @@ class SentdeBot(sc2.BotAI):
 
 
     async def defend(self):
+        end_OK = False
         if self.units.of_type(self.army_units).idle.amount >= 5:
             for struct in self.units.of_type([SUPPLYDEPOT, SUPPLYDEPOTLOWERED, SUPPLYDEPOTDROP,BARRACKS, COMMANDCENTER, REFINERY]).ready:
                 for enemy in self.known_enemy_units.not_structure:
-                    if enemy.position.to2.distance_to(struct.position.to2) < 10:
-                        for ma in self.units.of_type(self.army_units).idle:
-                            await self.do(ma.attack(enemy))
+                    if enemy.type_id != UnitTypeId.CHANGELINGMARINESHIELD:
+                        print(enemy.type_id)
+                        if enemy.position.to2.distance_to(struct.position.to2) < 10:
+                            end_OK = True
+                            for ma in self.units.of_type(self.army_units).idle:
+                                if enemy.is_flying and ma.can_attack_air:
+                                    await self.do(ma.attack(enemy.position))
+                                elif not enemy.is_flying:
+                                    await self.do(ma.attack(enemy.position))
+                if end_OK:
+                    break
 
 
     async def attack(self):
-        if self.units.of_type(self.army_units).idle.amount > 15:
+        if len(self.units.of_type(self.army_units).idle) > 15:
             choice = random.randrange(0, 4)
             target = False
             count_marine = 0
@@ -377,11 +385,11 @@ class SentdeBot(sc2.BotAI):
                         target = self.known_enemy_structures.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
 
                 elif choice == 3 and len(self.units.of_type(MARINE).idle) > 20 and len(self.units.of_type(MARAUDER).idle) > 5:
-                    #attack_closest_enemy_units
+                    #attack_closest_structures
                     count_marine = 25
                     count_marauder = 5
-                    if len(self.known_enemy_units) > 0:
-                        target = self.known_enemy_units.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
+                    if len(self.known_enemy_structures) > 0:
+                        target = self.known_enemy_structures.closest_to(random.choice(self.units.of_type([COMMANDCENTER, ORBITALCOMMAND])))
 
                 if target:
                     count_order_marine = 0
@@ -404,10 +412,11 @@ class SentdeBot(sc2.BotAI):
                         else:
                             break
 
-                y = np.zeros(4)
-                y[choice] = 1
-                print(choice)
-                self.train_data.append([y,self.flipped])
+                    y = np.zeros(4)
+                    y[choice] = 1
+                    print(choice)
+                    self.train_data.append([y,self.flipped])
+
 
 for i in range(1):
     run_game(maps.get("AbyssalReefLE"), [
